@@ -7,14 +7,15 @@ import android.content.SharedPreferences
 import android.nfc.NdefMessage
 import android.nfc.NfcAdapter
 import android.nfc.Tag
-import android.nfc.tech.NfcA
 import androidx.appcompat.app.AppCompatActivity
 import android.os.Bundle
-import android.util.Log
 import android.webkit.JavascriptInterface
+import android.webkit.WebSettings
 import android.webkit.WebViewClient
 import android.widget.Toast
 import kotlinx.android.synthetic.main.activity_main.*
+import java.nio.charset.Charset
+
 
 class MainActivity : AppCompatActivity() {
     private var sharedPreferences: SharedPreferences? = null
@@ -39,9 +40,6 @@ class MainActivity : AppCompatActivity() {
         webView.webViewClient = WebViewClient()
         webView.loadUrl("http://dev.posithive.co.uk:8283")
         webView.settings.javaScriptEnabled = true
-        webView.addJavascriptInterface(WebAppInterface(this), "Android")
-
-        loginUsingSavedData()
     }
 
     override fun onResume() {
@@ -65,44 +63,31 @@ class MainActivity : AppCompatActivity() {
         if (intent == null)
             return
 
-        val tag = intent.getParcelableExtra(NfcAdapter.EXTRA_TAG) as? Tag
-        if (tag != null) {
-            val tagId = tag.id.toString()
-            Toast.makeText(this, tagId, Toast.LENGTH_SHORT)
-            loginUsingUuid(tagId)
+        if (NfcAdapter.ACTION_NDEF_DISCOVERED == intent.action) {
+            intent.getParcelableArrayExtra(NfcAdapter.EXTRA_NDEF_MESSAGES)?.also { rawMessages ->
+                val messages: List<NdefMessage> = rawMessages.map { it as NdefMessage }
+                if (messages.isNotEmpty()) {
+                    val message = messages[0]
+                    if (message.records.isNotEmpty()) {
+                        val record = message.records[0]
+                        val uuid = String(record.payload, Charset.forName("UTF-8"))
+                        loginUsingUuid(uuid)
+                    }
+                }
+            }
         }
     }
 
-    private fun loginUsingSavedData() {
-        if (sharedPreferences == null)
-            return
-
-        val uuid = sharedPreferences!!.getString("uuid", "")
-        if (uuid!!.isEmpty())
-            return
-
-        loginUsingUuid(uuid)
+    private fun makeHex(bytes: ByteArray): String {
+        var result = ""
+        for (byte in bytes) {
+            val value = String.format("%02X", byte)
+            result += value
+        }
+        return result
     }
 
     private fun loginUsingUuid(uuid: String) {
-        webView.evaluateJavascript("javascript: loginFromPhone($uuid)", null)
-    }
-
-    class WebAppInterface(private val mainActivity: MainActivity) {
-        @JavascriptInterface
-        fun saveUuidOnPhone(uuid: String) {
-            if (mainActivity.editor != null) {
-                mainActivity.editor!!.putString("uuid", uuid)
-                mainActivity.editor!!.commit()
-            }
-        }
-
-        @JavascriptInterface
-        fun logOutFromPhone() {
-            if (mainActivity.editor != null) {
-                mainActivity.editor!!.remove("uuid")
-                mainActivity.editor!!.commit()
-            }
-        }
+        webView.evaluateJavascript("javascript:loginFromPhone('$uuid');", null)
     }
 }
